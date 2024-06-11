@@ -5,6 +5,7 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from .spice_utils import get_kernels
 import spiceypy as spice
+import os
 
 slit_widths = {
     'D1': 14 * u.arcsec
@@ -22,10 +23,16 @@ class SpectralProjection:
             except spice.NotFoundError:
                 spice.furnsh(kernel)
 
+        kernels.append(os.path.join(KERNEL_DATAFOLDER, "keck.bsp"))
+        for kernel in kernels:
+            spice.furnsh(kernel)
+
+        spice.boddef("KECK", 1001)
+
         with fits.open(filename) as hdulist:
             primaryhdu = hdulist[0]
             header = primaryhdu.header
-            self.obstime = Time(float(header['MJD']), format='mjd')
+            self.obstime = Time(header['DATE-OBS'])
 
             # rotate positional angle so that it is clockwise from top
             self.position_angle = (270 + float(header['ROTPOSN'])) * u.deg
@@ -34,7 +41,7 @@ class SpectralProjection:
 
             self.data = primaryhdu.data
 
-            self.n_wavelenghts, self.n_pos, self.n_orders = self.data.shape
+            self.n_wavelengths, self.n_pos, self.n_orders = self.data.shape
 
             self.et = spice.utc2et(self.obstime.to_datetime().isoformat())
 
@@ -58,7 +65,7 @@ class SpectralProjection:
             # check for the intercept
             try:
                 spoint, ep, srfvec = spice.sincpt("Ellipsoid", self.target, self.et,
-                                                  self.target_frame, "CN+S", "EARTH", "J2000", veci)
+                                                  self.target_frame, "CN+S", "KECK", "J2000", veci)
             except Exception:
                 continue
 

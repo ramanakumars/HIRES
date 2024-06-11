@@ -5,6 +5,7 @@ import fnmatch
 import tqdm
 
 BASEURL = 'https://naif.jpl.nasa.gov/pub/naif/'
+KERNEL_DATAFOLDER = './kernels/'
 
 
 def fetch_kernels_from_https(path, pattern):

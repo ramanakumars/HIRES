@@ -2,14 +2,13 @@ import numpy as np
 from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
-from .spice_utils import get_kernels
+from .spice_utils import get_kernels, KERNEL_DATAFOLDER
 import spiceypy as spice
 import tqdm
 import os
 from skimage.measure import find_contours
 from .fit_utils import get_ellipse_params
 
-KERNEL_DATAFOLDER = './kernels/'
 
 KECK_LOCATION = (np.radians(19.8263), -np.radians(155.47441))
 
@@ -17,6 +16,16 @@ KECK_LOCATION = (np.radians(19.8263), -np.radians(155.47441))
 def gamma_correct(img, gamma=0.1):
     img_norm = img / 65536
     return img_norm ** gamma
+
+
+def flip_north_south(wcs):
+    '''
+        Flips the WCS rotation by 180deg to fix north/south alignment issues.
+        Use if the WCS fit is not lining up with the north/south pole.
+    '''
+    wcs.wcs.pc = np.matmul(wcs.wcs.pc, [[-1, 0], [0, -1]])
+
+    return wcs
 
 
 class GuiderImageProjection:
@@ -38,7 +47,7 @@ class GuiderImageProjection:
         self.filename = filename
         with fits.open(self.filename) as hdulist:
             self.header = hdulist[0].header
-            self.obstime = Time(float(self.header['MJD-OBS']), format='mjd')
+            self.obstime = Time(self.header['DATE-OBS'] + 'T' + self.header['UTC'])
             self.data = hdulist[0].data
 
             try:
@@ -55,7 +64,7 @@ class GuiderImageProjection:
                     'CRVAL1': float(self.header['RA']),
                     'CRVAL2': float(self.header['DEC']),
                     'CDELT1': 4.7341E-05,
-                    'CDELT2': 4.7363E-05,
+                    'CDELT2': 4.7341E-05,
                     'CTYPE1': 'RA---TAN',
                     'CTYPE2': 'DEC--TAN',
                     'CUNIT1': 'deg',
@@ -67,8 +76,6 @@ class GuiderImageProjection:
         for kernel in kernels:
             spice.furnsh(kernel)
 
-        spice.boddef("KECK", 1001)
-
         self.et = spice.utc2et(self.obstime.to_datetime().isoformat())
 
         # calculate target information
@@ -77,12 +84,7 @@ class GuiderImageProjection:
         self.radii = spice.bodvar(spice.bodn2c(target), "RADII", 3)
         self.flattening = (self.radii[0] - self.radii[2]) / self.radii[0]
 
-        # get the location of the observatory in J2000
-        radii = spice.bodvar(spice.bodn2c("EARTH"), "RADII", 3)
-        flattening = (radii[0] - radii[2]) / radii[0]
-        self.keck_vec = spice.pgrrec("EARTH", KECK_LOCATION[1], KECK_LOCATION[0], 4.14, radii[0], flattening)
-        self.keck_j2000, _ = spice.spkpos("KECK", self.et, "J2000", "CN+S", "EARTH")
-        dist, targRA, targDec = spice.recrad(self.keck_j2000)
+        spice.boddef("KECK", 1001)
 
         self.find_sub_pt()
         self.find_limb()
@@ -107,7 +109,6 @@ class GuiderImageProjection:
         data = gamma_correct(self.data, gamma)
         range = data.max() - data.min()
         contours = find_contours(data, threshold * range + data.min())
-        print(len(contours), contours[0].shape)
         best_contour = np.argmax([np.linalg.norm(np.trapz(cont, axis=0)) for cont in contours])
 
         return contours[best_contour][:, ::-1]
@@ -130,13 +131,6 @@ class GuiderImageProjection:
 
         return get_ellipse_params(contour, self.limbRADec, self.subpt, wcs, self.data.shape)
 
-    def flip_north_south(self):
-        '''
-            Flips the WCS rotation by 180deg to fix north/south alignment issues.
-            Use if the WCS fit is not lining up with the north/south pole.
-        '''
-        self.wcs.wcs.pc = np.matmul(self.wcs.wcs.pc, [[-1, 0], [0, -1]])
-
     def update_fits_wcs(self, wcs: WCS) -> None:
         '''
             Save the input WCS parameter to the FITS file
@@ -146,7 +140,7 @@ class GuiderImageProjection:
             wcs : WCS
                 The updated WCS fits
         '''
-        with open(self.filename, 'update') as hdulist:
+        with fits.open(self.filename, 'update') as hdulist:
             hdulist[0].header.update(wcs.to_header())
 
     def find_sub_pt(self):
@@ -174,7 +168,8 @@ class GuiderImageProjection:
 
     def find_limb(self):
         '''
-            Get the limb and corresponding parameters for the planet given the observing date
+            Get the limb and corresponding parameters (epoch, distance, vector) for the planet
+            given the observing date
         '''
         rolstep = np.radians(5)
         ncuts = int(2. * np.pi / rolstep)
@@ -195,14 +190,6 @@ class GuiderImageProjection:
             # also convert to RA/Dec
             self.limbdist[i], self.limbRADec[i, 0], self.limbRADec[i, 1] = spice.recrad(self.limbJ2000[i, :])
 
-        # the east point is a quarter way through the circle
-        EE = int(ncuts / 4)
-
-        # get the apparent semi-major and semi-minor axis
-        EEvec = self.limbRADec[EE] - self.subpt
-
-        self.RArotang = -np.arctan2(EEvec[1], EEvec[0])
-
     def project_to_lonlat(self):
         ny, nx = self.data.shape
 
@@ -217,22 +204,18 @@ class GuiderImageProjection:
         for n, (i, j) in enumerate(tqdm.tqdm(zip(X.flatten(), Y.flatten()), total=X.size)):
             ra = radecs[n].ra
             dec = radecs[n].dec
-            veci = spice.radrec(1., ra.radian, dec.radian) + self.keck_j2000
+            veci = spice.radrec(1., ra.radian, dec.radian)
 
             # check for the intercept
             try:
-                spoint, ep, srfvec = \
-                    spice.sincpt(
-                        "Ellipsoid", self.target, self.et,
-                        self.target_frame, "CN+S", "KECK",
-                        "J2000", veci)
+                spoint, ep, srfvec = spice.sincpt("Ellipsoid", self.target, self.et,
+                                                  self.target_frame, "CN+S", "KECK",
+                                                  "J2000", veci)
             except Exception:
                 continue
 
             # if the intercept works, determine the planetographic
             # lat/lon values
-            loni, lati, alt = \
-                spice.recpgr(self.target, spoint,
-                             self.radii[0], self.flattening)
+            loni, lati, alt = spice.recpgr(self.target, spoint, self.radii[0], self.flattening)
 
             self.lonlat[j, i, :] = np.degrees(loni), np.degrees(lati)

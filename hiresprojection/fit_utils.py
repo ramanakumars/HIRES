@@ -1,6 +1,9 @@
 import numpy as np
 from scipy import optimize
 from shapely.geometry import Polygon
+import logging
+
+logger = logging.getLogger(__name__)
 
 RAD2ARCSEC = 206265.
 
@@ -102,7 +105,7 @@ def get_ellipse_params(v, limb, subpt, wcs, img_size):
     # improve the convergence by finding a smaller range in alpha (the plate rotation)
     output = optimize.dual_annealing(func_alpha, [[alpha - abs(alpha) * 0.1, alpha + abs(alpha) * 0.1]], x0=[alpha])
 
-    print(output.x, output.fun)
+    logging.debug(output.x, output.fun)
     alpha = output.x[0]
     A = (A + 1) * initial_scale
     alpha = alpha * np.pi
