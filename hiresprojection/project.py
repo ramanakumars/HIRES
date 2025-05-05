@@ -36,7 +36,7 @@ def project_and_save(filename, outfile, slit_center=None, target='JUPITER'):
         obstime = Time(header['DATE-OBS'])
 
         # rotate positional angle so that it is clockwise from top
-        position_angle = (270 + float(header['ROTPOSN'])) * u.deg
+        position_angle = (90 + float(header['ROTPOSN'])) * u.deg
         slit_width = slit_widths[header['DECKNAME'].strip()]
         if slit_center is None:
             slit_center = SkyCoord(f'{header["RA"]} {header["DEC"]}', frame="fk5", unit=(u.hourangle, u.deg), obstime=obstime)
