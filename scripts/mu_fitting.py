@@ -1,13 +1,11 @@
 import numpy as np
-import tqdm
 import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.time import Time
 from scipy.signal import savgol_filter
 from astropy import units as u
-import glob
 from astroquery.jplhorizons import Horizons
-import os
+from scipy.optimize import dual_annealing
 import logging
 import argparse
 import pathlib
@@ -22,7 +20,7 @@ def get_solar_spectra(file: str, time: str) -> tuple[np.ndarray, np.ndarray]:
     AU = 1.496e11
     # sun_jup_dist = 4.958302537873 * AU
     jupiter = Horizons(id=599, location='T16', epochs=Time(time).mjd)
-    sun_jup_dist = jupiter.ephemerides()['r'][0] * AU
+    sun_jup_dist = jupiter.ephemerides()['r'][0]
 
     with fits.open(file) as hdulist:
         data = np.asarray(hdulist[1].data[:])
@@ -35,25 +33,29 @@ def get_solar_spectra(file: str, time: str) -> tuple[np.ndarray, np.ndarray]:
     return data[:, 0], spectra_jupiter
 
 
-parser = argparse.ArgumentParser(description="Get the I/F for a set of input FITS files using a calibration file")
-parser.add_argument("-input_folder", "--input_folder", type=pathlib.Path, required=True)
+parser = argparse.ArgumentParser(description="Fit the Minnaert coefficients for a Jupiter spectra")
+parser.add_argument("-input_files", "--input_files", type=pathlib.Path, nargs='+', required=True)
 parser.add_argument("-calibration_file", "--calibration_file", type=pathlib.Path, required=True)
 parser.add_argument("-solar_spectra", "--solar_spectra", type=pathlib.Path, required=True)
-parser.add_argument("-output_folder", "--output_folder", type=pathlib.Path, required=True)
-parser.add_argument("--overwrite", action="store_true")
+parser.add_argument("-output_file", "--output_file", type=pathlib.Path, required=True)
 args = parser.parse_args()
 
-jupiter_fits = sorted(glob.glob(os.path.join(args.input_folder, "*.fits")))
+jupiter_fits = args.input_files
 
 calibration = np.load(args.calibration_file)
 
-for i, file in enumerate(tqdm.tqdm(jupiter_fits)):
-    filename = os.path.basename(file)
+mu = []
+mu0 = []
+ifs = []
+
+for i, file in enumerate(jupiter_fits):
+    with fits.open(file) as hdulist:
+        latitude = hdulist[6].data[:]
+        longitude = hdulist[5].data[:]
+        incidence = hdulist[7].data[:]
+        emission = hdulist[8].data[:]
+
     header, datai, wavei = get_data_from_fits(file)
-
-    if 'jupiter' not in header['targname'].lower():
-        continue
-
     calibrated_data = np.zeros_like(datai)
 
     # area of the pixel in steradians
@@ -71,8 +73,43 @@ for i, file in enumerate(tqdm.tqdm(jupiter_fits)):
         sol[k, :] = np.interp(wavei[k], solar_wavelength / 10, solar_spectra.value)
 
     if_jupiter = calibrated_data / sol
+    if_jupiter_max = if_jupiter[:, np.argmin(incidence), :]
+    if_jupiter = np.nanmedian(if_jupiter / np.repeat(if_jupiter_max[:, np.newaxis, :], 61, axis=1), axis=-1)
 
-    with fits.open(file) as hdulist:
-        hdu = hdulist[0]
-        hdu.data = if_jupiter
-        hdulist.writeto(os.path.join(args.output_folder, filename.replace(".fits", "_cal.fits")), overwrite=args.overwrite)
+    mu0.append(np.cos(np.radians(incidence))[:-3])
+    mu.append(np.cos(np.radians(emission))[:-3])
+    ifs.append(if_jupiter[:, :-3])
+
+mu0 = np.asarray(mu0)
+mu = np.asarray(mu)
+ifs = np.asarray(ifs)
+
+print(ifs.shape)
+
+minnaert_k = np.zeros(ifs.shape[1])
+minnaert_b = np.zeros(ifs.shape[1])
+
+for k in range(ifs.shape[1]):
+    mu0_k = mu0.flatten()
+    mu_k = mu.flatten()
+    ifs_k = ifs[:, k].flatten()
+
+    print(ifs_k.min(), ifs_k.max(), mu0_k.min(), mu0_k.max(), mu_k.min(), mu_k.max())
+
+    def func(x):
+        ki, bi = x
+        return np.mean(np.abs(ki * np.log(mu0_k) + (ki - 1) * np.log(mu_k) + bi - np.log(ifs_k)))
+
+    bounds = [[0, 2], [-2, 2]]
+    try:
+        output = dual_annealing(func, bounds)
+
+        minnaert_k[k] = output.x[0]
+        minnaert_b[k] = np.exp(output.x[1])
+
+        print(output.x[0])
+    except ValueError as e:
+        print(e)
+        continue
+
+np.savez(args.output_file, minnaert_k=minnaert_k, minnaert_b=minnaert_b)

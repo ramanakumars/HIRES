@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(description="Calibrate the HIRES spectra spectra with a reference star")
 parser.add_argument("-star_folder", "--star_folder", type=pathlib.Path, required=True)
-parser.add_argument("-raw_data_folder", "--raw_data_folder", type=pathlib.Path, required=True)
 parser.add_argument("-target", "--target", type=str, required=True, default="HR8634")
 args = parser.parse_args()
 
@@ -25,12 +24,12 @@ STAR_TARGET = args.target
 all_star_fits = sorted(glob.glob(os.path.join(args.star_folder, "*.fits")))
 star_fits = []
 for i, star in enumerate(all_star_fits):
-    with fits.open(star.replace(str(args.star_folder), str(args.raw_data_folder))) as hdulist:
+    with fits.open(star) as hdulist:
         header = hdulist[0].header
     if header['targname'].strip() in star_spectra:
         star_fits.append({'target': header['targname'], 'file': star})
 
-logger.info(f"Found {len(star_fits)} files")
+logger.info(f"Found {len(star_fits)} files for stars: {set([file['target'] for file in star_fits])}")
 
 if not os.path.exists(STAR_TARGET):
     os.makedirs(STAR_TARGET)
@@ -48,7 +47,11 @@ least_squares = np.zeros((len(cal_files), len(star_spectra)))
 for j, (star_name, star_spectrum) in enumerate(star_spectra.items()):
     fig, ax = plt.subplots(1, 1, figsize=(8, 4), dpi=150)
 
-    target = [star for star in star_fits if star['target'] == star_name][1]
+    try:
+        target = [star for star in star_fits if star['target'] == star_name][0]
+    except IndexError:
+        print(f"No observations found for {star_name}")
+        break
     _, data0_coarse = get_coarse_data(target['file'])
     scaled_star_data = []
     for star in star_fits:

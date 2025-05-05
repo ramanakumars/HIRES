@@ -23,7 +23,6 @@ folder = args.folder
 guide_folder = args.guide_folder
 navfolder = args.navfolder
 
-
 guide_fits = sorted(glob.glob(os.path.join(guide_folder, "*.fits")))
 guide_times = []
 guide_RAs = []
@@ -54,6 +53,7 @@ for file in files:
 
     ind = np.argmin((time - guide_times)**2.)
     guider_fits = guide_fits[ind]
+    logger.info(f"Using {guider_fits} for positioning")
     time_diff = (guide_times[ind] - time) * 24 * 3600
     if np.abs(time_diff) < 10:
         with fits.open(guider_fits) as guider_hdus:
