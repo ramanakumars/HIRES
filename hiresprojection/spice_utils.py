@@ -1,8 +1,9 @@
-import os
-from bs4 import BeautifulSoup
-import requests
 import fnmatch
+import os
+
+import requests
 import tqdm
+from bs4 import BeautifulSoup
 
 BASEURL = 'https://naif.jpl.nasa.gov/pub/naif/'
 KERNEL_DATAFOLDER = './kernels/'
@@ -38,7 +39,15 @@ def download_kernel(kernel, KERNEL_DATAFOLDER):
             f.write(response.content)
         else:
             total_length = int(total_length)
-            with tqdm.tqdm(total=total_length, unit='B', unit_scale=True, unit_divisor=1024, dynamic_ncols=True, ascii=True, desc=f'Downloading {kernel}') as pbar:
+            with tqdm.tqdm(
+                total=total_length,
+                unit='B',
+                unit_scale=True,
+                unit_divisor=1024,
+                dynamic_ncols=True,
+                ascii=True,
+                desc=f'Downloading {kernel}',
+            ) as pbar:
                 for data in response.iter_content(chunk_size=4096):
                     f.write(data)
                     pbar.update(len(data))
@@ -48,16 +57,32 @@ def get_kernels(KERNEL_DATAFOLDER, target='JUPITER'):
     if not os.path.exists(KERNEL_DATAFOLDER):
         os.mkdir(KERNEL_DATAFOLDER)
 
-    for folder in ['generic_kernels/pck/', 'generic_kernels/spk/planets/', 'generic_kernels/spk/satellites/', 'generic_kernels/fk/planets/', 'generic_kernels/lsk/']:
+    for folder in [
+        'generic_kernels/pck/',
+        'generic_kernels/spk/planets/',
+        'generic_kernels/spk/satellites/',
+        'generic_kernels/fk/planets/',
+        'generic_kernels/lsk/',
+    ]:
         if not os.path.exists(os.path.join(KERNEL_DATAFOLDER, folder)):
             os.makedirs(os.path.join(KERNEL_DATAFOLDER, folder))
 
     pcks = fetch_kernels_from_https(BASEURL + "generic_kernels/pck/", "pck00011*.tpc")
-    pcks.extend(fetch_kernels_from_https(BASEURL + "generic_kernels/pck/", "earth_latest_high_prec.bpc"))
-    spks1 = fetch_kernels_from_https(BASEURL + "generic_kernels/spk/planets/", "de441*.bsp")
-    spks2 = fetch_kernels_from_https(BASEURL + "generic_kernels/spk/satellites/", f"{target[:3].lower()}*.bsp")
+    pcks.extend(
+        fetch_kernels_from_https(
+            BASEURL + "generic_kernels/pck/", "earth_latest_high_prec.bpc"
+        )
+    )
+    spks1 = fetch_kernels_from_https(
+        BASEURL + "generic_kernels/spk/planets/", "de441*.bsp"
+    )
+    spks2 = fetch_kernels_from_https(
+        BASEURL + "generic_kernels/spk/satellites/", f"{target[:3].lower()}*.bsp"
+    )
     fks = fetch_kernels_from_https(BASEURL + "generic_kernels/fk/planets/", "*.tf")
-    lsks = fetch_kernels_from_https(BASEURL + "generic_kernels/lsk/", "latest_leapseconds.tls")
+    lsks = fetch_kernels_from_https(
+        BASEURL + "generic_kernels/lsk/", "latest_leapseconds.tls"
+    )
 
     kernels = [*pcks, *spks1, spks2[-1], *fks, *lsks]
 

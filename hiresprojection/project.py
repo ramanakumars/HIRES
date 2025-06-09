@@ -1,17 +1,17 @@
-import numpy as np
 import copy
-from einops import rearrange
-import astropy.units as u
-from astropy.io import fits
-from astropy.coordinates import SkyCoord
-from astropy.time import Time
-from .spice_utils import get_kernels
-import spiceypy as spice
 import os
 
-slit_widths = {
-    'D1': 14 * u.arcsec
-}
+import astropy.units as u
+import numpy as np
+import spiceypy as spice
+from astropy.coordinates import SkyCoord
+from astropy.io import fits
+from astropy.time import Time
+from einops import rearrange
+
+from .spice_utils import get_kernels
+
+slit_widths = {'D1': 14 * u.arcsec}
 
 KERNEL_DATAFOLDER = './kernels/'
 
@@ -39,7 +39,12 @@ def project_and_save(filename, outfile, slit_center=None, target='JUPITER'):
         position_angle = (90 + float(header['ROTPOSN'])) * u.deg
         slit_width = slit_widths[header['DECKNAME'].strip()]
         if slit_center is None:
-            slit_center = SkyCoord(f'{header["RA"]} {header["DEC"]}', frame="fk5", unit=(u.hourangle, u.deg), obstime=obstime)
+            slit_center = SkyCoord(
+                f'{header["RA"]} {header["DEC"]}',
+                frame="fk5",
+                unit=(u.hourangle, u.deg),
+                obstime=obstime,
+            )
 
         data = primaryhdu.data
 
@@ -57,10 +62,15 @@ def project_and_save(filename, outfile, slit_center=None, target='JUPITER'):
         radii = spice.bodvar(spice.bodn2c(target), "RADII", 3)
         flattening = (radii[0] - radii[2]) / radii[0]
 
-        half_width = slit_width.to(u.arcsec).value / 2.
-        separations = np.linspace(-half_width, half_width, n_pos, endpoint=True) * u.arcsec
+        half_width = slit_width.to(u.arcsec).value / 2.0
+        separations = (
+            np.linspace(-half_width, half_width, n_pos, endpoint=True) * u.arcsec
+        )
 
-        points = [slit_center.directional_offset_by(position_angle, sep) for sep in separations]
+        points = [
+            slit_center.directional_offset_by(position_angle, sep)
+            for sep in separations
+        ]
 
         lon = np.nan * np.zeros(n_pos)
         lat = np.nan * np.zeros(n_pos)
@@ -69,12 +79,15 @@ def project_and_save(filename, outfile, slit_center=None, target='JUPITER'):
         phase = np.nan * np.zeros(n_pos)
 
         for i, point in enumerate(points):
-            veci = spice.radrec(1., point.ra.to(u.radian).value, point.dec.to(u.radian).value)
+            veci = spice.radrec(
+                1.0, point.ra.to(u.radian).value, point.dec.to(u.radian).value
+            )
 
             # check for the intercept
             try:
-                spoint, _, _ = spice.sincpt("Ellipsoid", target, et,
-                                            target_frame, "CN+S", "KECK", "J2000", veci)
+                spoint, _, _ = spice.sincpt(
+                    "Ellipsoid", target, et, target_frame, "CN+S", "KECK", "J2000", veci
+                )
             except Exception:
                 continue
 
@@ -83,7 +96,9 @@ def project_and_save(filename, outfile, slit_center=None, target='JUPITER'):
             loni, lati, _ = spice.recpgr(target, spoint, radii[0], flattening)
             lon[i], lat[i] = np.degrees(loni), np.degrees(lati)
 
-            _, _, phase[i], inci[i], emis[i] = spice.ilumin("ELLIPSOID", target, et, target_frame, "CN+S", "KECK", spoint)
+            _, _, phase[i], inci[i], emis[i] = spice.ilumin(
+                "ELLIPSOID", target, et, target_frame, "CN+S", "KECK", spoint
+            )
 
         lonHeader = fits.Header()
         lonHeader['EXTNAME'] = "SYS_III_LONGITUDE"

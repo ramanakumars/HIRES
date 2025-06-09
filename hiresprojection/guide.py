@@ -1,27 +1,28 @@
+import os
+
 import numpy as np
+import spiceypy as spice
+import tqdm
 from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
-from .spice_utils import get_kernels, KERNEL_DATAFOLDER
-import spiceypy as spice
-import tqdm
-import os
 from skimage.measure import find_contours
-from .fit_utils import get_ellipse_params
 
+from .fit_utils import get_ellipse_params
+from .spice_utils import KERNEL_DATAFOLDER, get_kernels
 
 KECK_LOCATION = (np.radians(19.8263), -np.radians(155.47441))
 
 
 def gamma_correct(img, gamma=0.1):
     img_norm = img / 65536
-    return img_norm ** gamma
+    return img_norm**gamma
 
 
 def flip_north_south(wcs):
     '''
-        Flips the WCS rotation by 180deg to fix north/south alignment issues.
-        Use if the WCS fit is not lining up with the north/south pole.
+    Flips the WCS rotation by 180deg to fix north/south alignment issues.
+    Use if the WCS fit is not lining up with the north/south pole.
     '''
     wcs.wcs.pc = np.matmul(wcs.wcs.pc, [[-1, 0], [0, -1]])
 
@@ -30,19 +31,20 @@ def flip_north_south(wcs):
 
 class GuiderImageProjection:
     '''
-        Functions to fit and project the MAGIQ guider images
+    Functions to fit and project the MAGIQ guider images
     '''
+
     def __init__(self, filename: str, target: str = 'JUPITER'):
         '''
-            Initialize the projector by loading the data and the spice kernels.
-            Also load metadata for the positioning data (for Keck and also for Jupiter)
+        Initialize the projector by loading the data and the spice kernels.
+        Also load metadata for the positioning data (for Keck and also for Jupiter)
 
-            Inputs
-            ------
-            filename : str
-                Path to the FITS file
-            target : str
-                Target observing body (currently only works for Jupiter)
+        Inputs
+        ------
+        filename : str
+            Path to the FITS file
+        target : str
+            Target observing body (currently only works for Jupiter)
         '''
         self.filename = filename
         with fits.open(self.filename) as hdulist:
@@ -55,21 +57,23 @@ class GuiderImageProjection:
             except Exception:
                 # set default parameters based on what we know
                 # about the guider camera
-                self.wcs = WCS({
-                    'NAXIS': 2,
-                    'NAXIS1': self.data.shape[0],
-                    'NAXIS2': self.data.shape[1],
-                    'CRPIX1': 256,
-                    'CRPIX2': 256,
-                    'CRVAL1': float(self.header['RA']),
-                    'CRVAL2': float(self.header['DEC']),
-                    'CDELT1': 4.7341E-05,
-                    'CDELT2': 4.7341E-05,
-                    'CTYPE1': 'RA---TAN',
-                    'CTYPE2': 'DEC--TAN',
-                    'CUNIT1': 'deg',
-                    'CUNIT2': 'deg'
-                })
+                self.wcs = WCS(
+                    {
+                        'NAXIS': 2,
+                        'NAXIS1': self.data.shape[0],
+                        'NAXIS2': self.data.shape[1],
+                        'CRPIX1': 256,
+                        'CRPIX2': 256,
+                        'CRVAL1': float(self.header['RA']),
+                        'CRVAL2': float(self.header['DEC']),
+                        'CDELT1': 4.7341e-05,
+                        'CDELT2': 4.7341e-05,
+                        'CTYPE1': 'RA---TAN',
+                        'CTYPE2': 'DEC--TAN',
+                        'CUNIT1': 'deg',
+                        'CUNIT2': 'deg',
+                    }
+                )
 
         kernels = get_kernels(KERNEL_DATAFOLDER, 'jupiter')
         kernels.append(os.path.join(KERNEL_DATAFOLDER, "keck.bsp"))
@@ -91,72 +95,84 @@ class GuiderImageProjection:
 
     def detect_limb(self, gamma: float = 0.1, threshold: float = 0.7) -> np.ndarray:
         '''
-            Find the limb in the observation. Returns a set of coordinates containing the limb
+        Find the limb in the observation. Returns a set of coordinates containing the limb
 
-            Inputs
-            ------
-            gamma : float
-                Parameter for gamma stretching the image. Use lower values to highlight the limb more
-            threshold : float
-                Threshold for discerning between limb and background.
+        Inputs
+        ------
+        gamma : float
+            Parameter for gamma stretching the image. Use lower values to highlight the limb more
+        threshold : float
+            Threshold for discerning between limb and background.
 
-            Outputs
-            -------
-            limb : np.ndarray
-                Set of coordinates (X/Y) for the detected limb
+        Outputs
+        -------
+        limb : np.ndarray
+            Set of coordinates (X/Y) for the detected limb
 
         '''
         data = gamma_correct(self.data, gamma)
         range = data.max() - data.min()
         contours = find_contours(data, threshold * range + data.min())
-        best_contour = np.argmax([np.linalg.norm(np.trapz(cont, axis=0)) for cont in contours])
+        best_contour = np.argmax(
+            [np.linalg.norm(np.trapz(cont, axis=0)) for cont in contours]
+        )
 
         return contours[best_contour][:, ::-1]
 
     def fit_limb_from_contour(self, contour: np.ndarray) -> WCS:
         '''
-            Fit the ellipse given a set of contour points of the limb. Returns the WCS fit.
+        Fit the ellipse given a set of contour points of the limb. Returns the WCS fit.
 
-            Inputs
-            ------
-            contour : np.ndarray
-                Set of coordinates (X/Y) for the limb
+        Inputs
+        ------
+        contour : np.ndarray
+            Set of coordinates (X/Y) for the limb
 
-            Outputs
-            -------
-            wcs: WCS
-                The WCS fit for the limb
+        Outputs
+        -------
+        wcs: WCS
+            The WCS fit for the limb
         '''
         wcs = WCS(self.wcs.to_header())
 
-        return get_ellipse_params(contour, self.limbRADec, self.subpt, wcs, self.data.shape)
+        return get_ellipse_params(
+            contour, self.limbRADec, self.subpt, wcs, self.data.shape
+        )
 
     def update_fits_wcs(self, wcs: WCS) -> None:
         '''
-            Save the input WCS parameter to the FITS file
+        Save the input WCS parameter to the FITS file
 
-            Inputs
-            ------
-            wcs : WCS
-                The updated WCS fits
+        Inputs
+        ------
+        wcs : WCS
+            The updated WCS fits
         '''
         with fits.open(self.filename, 'update') as hdulist:
             hdulist[0].header.update(wcs.to_header())
 
     def find_sub_pt(self):
         '''
-            Finds the sub-observer point in the IAU_[target] frame
-            and also the in the J2000 frame as seen from Earth.
-            Also creates a vector from Earth to the sub-obs point in the
-            J2000 frame for future use.
+        Finds the sub-observer point in the IAU_[target] frame
+        and also the in the J2000 frame as seen from Earth.
+        Also creates a vector from Earth to the sub-obs point in the
+        J2000 frame for future use.
         '''
 
         # get the position of the sub-obs point in the J2000 frame
-        self.subptvec, self.subptep, self.subpntobsvec = spice.subpnt('INTERCEPT/ELLIPSOID', self.target,
-                                                                      self.et, self.target_frame, 'CN+S', "KECK")
+        self.subptvec, self.subptep, self.subpntobsvec = spice.subpnt(
+            'INTERCEPT/ELLIPSOID',
+            self.target,
+            self.et,
+            self.target_frame,
+            'CN+S',
+            "KECK",
+        )
 
         # convert to lat/lon
-        self.subptlon, self.subptlat, _ = spice.recpgr(self.target, self.subptvec, self.radii[0], self.flattening)
+        self.subptlon, self.subptlat, _ = spice.recpgr(
+            self.target, self.subptvec, self.radii[0], self.flattening
+        )
 
         # convert the line of sight vector to J2000
         px1 = spice.pxfrm2(self.target_frame, 'J2000', self.subptep, self.et)
@@ -168,14 +184,26 @@ class GuiderImageProjection:
 
     def find_limb(self):
         '''
-            Get the limb and corresponding parameters (epoch, distance, vector) for the planet
-            given the observing date
+        Get the limb and corresponding parameters (epoch, distance, vector) for the planet
+        given the observing date
         '''
         rolstep = np.radians(5)
-        ncuts = int(2. * np.pi / rolstep)
-        _, limbs, eplimb, vecs = spice.limbpt('TANGENT/ELLIPSOID', self.target, self.et, self.target_frame,
-                                              'CN+S', "ELLIPSOID LIMB", "KECK", np.asarray([0, 0, 1]), rolstep,
-                                              ncuts, 1e-4, 1e-7, ncuts)
+        ncuts = int(2.0 * np.pi / rolstep)
+        _, limbs, eplimb, vecs = spice.limbpt(
+            'TANGENT/ELLIPSOID',
+            self.target,
+            self.et,
+            self.target_frame,
+            'CN+S',
+            "ELLIPSOID LIMB",
+            "KECK",
+            np.asarray([0, 0, 1]),
+            rolstep,
+            ncuts,
+            1e-4,
+            1e-7,
+            ncuts,
+        )
 
         self.limbJ2000 = np.zeros_like(vecs)
         self.limbRADec = np.zeros((ncuts, 2))
@@ -188,7 +216,9 @@ class GuiderImageProjection:
             self.limbJ2000[i, :] = np.matmul(pxi, vecs[i, :])
 
             # also convert to RA/Dec
-            self.limbdist[i], self.limbRADec[i, 0], self.limbRADec[i, 1] = spice.recrad(self.limbJ2000[i, :])
+            self.limbdist[i], self.limbRADec[i, 0], self.limbRADec[i, 1] = spice.recrad(
+                self.limbJ2000[i, :]
+            )
 
     def project_to_lonlat(self):
         ny, nx = self.data.shape
@@ -201,21 +231,32 @@ class GuiderImageProjection:
 
         radecs = self.wcs.pixel_to_world(X.flatten(), Y.flatten())
 
-        for n, (i, j) in enumerate(tqdm.tqdm(zip(X.flatten(), Y.flatten()), total=X.size)):
+        for n, (i, j) in enumerate(
+            tqdm.tqdm(zip(X.flatten(), Y.flatten()), total=X.size)
+        ):
             ra = radecs[n].ra
             dec = radecs[n].dec
-            veci = spice.radrec(1., ra.radian, dec.radian)
+            veci = spice.radrec(1.0, ra.radian, dec.radian)
 
             # check for the intercept
             try:
-                spoint, ep, srfvec = spice.sincpt("Ellipsoid", self.target, self.et,
-                                                  self.target_frame, "CN+S", "KECK",
-                                                  "J2000", veci)
+                spoint, ep, srfvec = spice.sincpt(
+                    "Ellipsoid",
+                    self.target,
+                    self.et,
+                    self.target_frame,
+                    "CN+S",
+                    "KECK",
+                    "J2000",
+                    veci,
+                )
             except Exception:
                 continue
 
             # if the intercept works, determine the planetographic
             # lat/lon values
-            loni, lati, alt = spice.recpgr(self.target, spoint, self.radii[0], self.flattening)
+            loni, lati, alt = spice.recpgr(
+                self.target, spoint, self.radii[0], self.flattening
+            )
 
             self.lonlat[j, i, :] = np.degrees(loni), np.degrees(lati)

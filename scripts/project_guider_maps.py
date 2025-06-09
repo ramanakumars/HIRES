@@ -1,19 +1,21 @@
+import argparse
 import glob
-from hiresprojection.guide import GuiderImageProjection
+import logging
+import os
+import pathlib
+
 import numpy as np
 from scipy.interpolate import griddata
-import argparse
-import logging
-import pathlib
-import os
+
+from hiresprojection.guide import GuiderImageProjection
 
 
 def plot_map(lon, lat, img, pixres=0.1):
     '''
-        project the image onto a lat/lon grid
+    project the image onto a lat/lon grid
     '''
-    gridlat = np.arange(-90., 90., pixres)
-    gridlon = np.arange(0., 360., pixres)
+    gridlat = np.arange(-90.0, 90.0, pixres)
+    gridlon = np.arange(0.0, 360.0, pixres)
 
     LAT, LON = np.meshgrid(gridlat, gridlon)
 
@@ -29,8 +31,8 @@ def plot_map(lon, lat, img, pixres=0.1):
     # convert to east positive
     IMG = griddata((lons, lats), img, (LON, LAT), method='cubic').T
 
-    IMG[np.isnan(IMG)] = 0.
-    IMG[IMG < 0.] = 0.
+    IMG[np.isnan(IMG)] = 0.0
+    IMG[IMG < 0.0] = 0.0
 
     return IMG
 
@@ -38,7 +40,9 @@ def plot_map(lon, lat, img, pixres=0.1):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser(description="Limb fit a set of MAGIQ files in a folder")
+parser = argparse.ArgumentParser(
+    description="Limb fit a set of MAGIQ files in a folder"
+)
 parser.add_argument("-folder", "--folder", type=pathlib.Path, required=True)
 parser.add_argument("-plotfolder", "--plotfolder", type=pathlib.Path, required=True)
 args = parser.parse_args()
@@ -63,6 +67,8 @@ for file in files:
 
     projector = GuiderImageProjection(file)
     projector.project_to_lonlat()
-    map = plot_map(projector.lonlat[:, :, 0], projector.lonlat[:, :, 1], projector.data / 65536)
+    map = plot_map(
+        projector.lonlat[:, :, 0], projector.lonlat[:, :, 1], projector.data / 65536
+    )
 
     np.savez(plotname, lonlat=projector.lonlat, map=map)

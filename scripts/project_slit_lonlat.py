@@ -1,19 +1,23 @@
+import argparse
 import glob
+import logging
 import os
+import pathlib
+
+import numpy as np
+import tqdm
 from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
-import numpy as np
-import tqdm
+
 from hiresprojection.project import project_and_save
-import logging
-import argparse
-import pathlib
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser(description="Limb fit a set of MAGIQ files in a folder")
+parser = argparse.ArgumentParser(
+    description="Limb fit a set of MAGIQ files in a folder"
+)
 parser.add_argument("-folder", "--folder", type=pathlib.Path, required=True)
 parser.add_argument("-guide_folder", "--guide_folder", type=pathlib.Path, required=True)
 parser.add_argument("-navfolder", "--navfolder", type=pathlib.Path, required=True)
@@ -51,7 +55,7 @@ for file in files:
         header = hdulist[0].header
         time = Time(hdulist[0].header['DATE-OBS']).mjd
 
-    ind = np.argmin((time - guide_times)**2.)
+    ind = np.argmin((time - guide_times) ** 2.0)
     guider_fits = guide_fits[ind]
     logger.info(f"Using {guider_fits} for positioning")
     time_diff = (guide_times[ind] - time) * 24 * 3600
@@ -62,4 +66,6 @@ for file in files:
         navfile = os.path.join(navfolder, fname.replace('.fits', '_nav.fits'))
         project_and_save(file, navfile, radec0)
     else:
-        logger.warning(f"Could not find close guide image for matching image center for {fname}. Closest time diffence was {time_diff} seconds")
+        logger.warning(
+            f"Could not find close guide image for matching image center for {fname}. Closest time diffence was {time_diff} seconds"
+        )
