@@ -10,13 +10,12 @@ import pandas as pd
 from astropy import units as u
 from astropy.io import fits
 
-from hiresprojection.calibration_utils import (
-    get_calibration,
+from hiresprojection.calibration_utils import get_calibration, subtract_sky
+from hiresprojection.io_utils import (
     get_coarse_data,
     get_data_from_fits,
-    star_spectra,
-    subtract_sky,
 )
+from hiresprojection.star import star_spectra
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

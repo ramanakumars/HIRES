@@ -1,92 +1,9 @@
 import numpy as np
-import pysynphot
 from astropy import units as u
-from astropy.io import fits
 from scipy.signal import savgol_filter
-from specreduce.calibration_data import Spectrum1D, load_onedstds
 
-NWAVE_COARSE = 50
-
-R_SUN = 696_340_000  # m
-LY = 9.4607e15  # light year in m
-
-# Load the data for HR8518 and HR0804 from the Castelli-Kurucz Atlas
-HR8518_spectrum = pysynphot.Icat('ck04models/', 10500, 0, 4.3)
-HR8518_wave = HR8518_spectrum.wave * u.AA
-HR8518_flux = (
-    HR8518_spectrum.flux
-    * ((2.7 * R_SUN) / (164 * LY)) ** 2.0
-    * u.erg
-    / (u.s * u.cm * u.cm * u.AA)
-)
-HR8518_mask = (HR8518_wave < 10000 * u.AA) & (HR8518_wave > 350 * u.AA)
-
-HR0804_spectrum = pysynphot.Icat('ck04models/', 8900, 0, 4.3)
-HR0804_wave = HR0804_spectrum.wave * u.AA
-HR0804_flux = (
-    HR0804_spectrum.flux
-    * ((1.9 * R_SUN) / (80 * LY)) ** 2.0
-    * u.erg
-    / (u.s * u.cm * u.cm * u.AA)
-)
-HR0804_mask = (HR0804_wave < 10000 * u.AA) & (HR0804_wave > 350 * u.AA)
-
-star_spectra = {
-    'HR8634': load_onedstds("eso", "ctiostan/hr8634.dat"),
-    'HR7950': load_onedstds("eso", "ctiostan/hr7950.dat"),
-    'HR0804': Spectrum1D(
-        flux=HR0804_flux[HR0804_mask], spectral_axis=HR0804_wave[HR0804_mask]
-    ),
-    'HR8518': Spectrum1D(
-        flux=HR8518_flux[HR8518_mask], spectral_axis=HR8518_wave[HR8518_mask]
-    ),
-}
-
-
-def get_data_from_fits(file: str) -> tuple[dict, np.ndarray, np.ndarray]:
-    """
-    Retrieve data from the HIRES FITS file (header, spectra, wavelength)
-
-    :param file: path to the FITS file
-
-    :returns: - header information
-              - spectra (shape: n_slit, n_wavelengths, n_echelle_order)
-              - wavelength (shape: n_wavelengths, n_echelle_order)
-    """
-    with fits.open(file) as hdulist:
-        header = hdulist[0].header
-        data = hdulist[0].data[:, :, :-50]
-        uncertainty = hdulist[1].data[:, :, :-50]
-        wavelength = hdulist[3].data[:, :-50]
-    data[np.isnan(data)] = 0.0
-    uncertainty[np.isnan(data)] = 0.0
-    return header, data, uncertainty, wavelength
-
-
-def get_coarse_data(file: str) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Retrieve data from a FITS file and get the coarse-resolution, sky-subtracted, savgol-filtered spectrum
-
-    :param file: path to the FITS file
-
-    :returns: - wavelength (shape: NWAVE_COARSE, n_echelle_order)
-              - spectra (shape: n_slit, NWAVE_COARSE, n_echelle_order)
-              - uncertainty (shape: n_slit, NWAVE_COARSE, n_echelle_order)
-    """
-    _, data, uncertainty, wavelength = get_data_from_fits(file)
-
-    data_coarse = np.zeros((31, 61, NWAVE_COARSE))
-    unc_coarse = np.zeros((31, 61, NWAVE_COARSE))
-    wave_coarse = np.zeros((31, NWAVE_COARSE))
-
-    for k in range(31):
-        wavei = np.linspace(wavelength[k].min(), wavelength[k].max(), NWAVE_COARSE)
-        wave_coarse[k] = wavei
-        for j in range(61):
-            data_coarse[k, j] = np.interp(wavei, wavelength[k], data[k, j])
-            unc_coarse[k, j] = np.interp(wavei, wavelength[k], uncertainty[k, j])
-
-    return wave_coarse, data_coarse, unc_coarse
+from .io_utils import get_coarse_data, get_data_from_fits
+from .star import star_spectra
 
 
 def get_standard_error_of_mean(
@@ -111,6 +28,18 @@ def get_standard_error_of_mean(
 def get_sky(
     data: np.ndarray, error: np.ndarray, background_mask: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Get the sky background spectra and error for a given observation. `background_mask` defines the positions
+    along the slit which defines the sky, which is median combined to give the sky spectra.
+
+    :param data: input spectra (shape: [nechelle, nslit, nwavelength])
+    :param error: the error in the spectra (same shape as data)
+    :param background_mask: a mask of the slit positions which correspond to the sky (shape: nslit)
+
+    :returns:
+        - the sky background spectra (shape: [nechelle, nwavelength])
+        - the error in the sky spectra (same shape as the spectra).
+    """
     sky = np.zeros_like(data[:, 0])
     sky_error = np.zeros_like(data[:, 0])
     # loop over all echelle orders, subtract the background and coarsen the data
@@ -132,6 +61,21 @@ def subtract_sky(
     object_mask: np.ndarray,
     background_mask: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Get the sky-subtracted spectra and error for a given observation assuming a point-source.
+    `background_mask` defines the position along the slit which defines the sky, which is
+    median combined to give the sky spectra. The `object_mask` defines the positions along
+    the slit which contain the point source. The final spectra is summed along `object_mask`
+
+    :param data: input spectra (shape: [nechelle, nslit, nwavelength])
+    :param error: the error in the spectra (same shape as data)
+    :param object_mask: a mask of the slit positions which correspond to the object (shape: nslit)
+    :param background_mask: a mask of the slit positions which correspond to the sky (shape: nslit)
+
+    :returns:
+        - the sky-subtracted spectra (shape: [nechelle, nwavelength])
+        - the error in the sky spectra (same shape as the spectra).
+    """
     sky_subtracted = np.zeros_like(data[:, 0])
     sky_subtracted_error = np.zeros_like(data[:, 0])
     sky, sky_error = get_sky(data, error, background_mask)

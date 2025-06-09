@@ -8,12 +8,12 @@ import numpy as np
 import tqdm
 from astropy import units as u
 
-from hiresprojection.calibration_utils import (
+from hiresprojection.calibration_utils import get_sky
+from hiresprojection.io_utils import (
     get_coarse_data,
     get_data_from_fits,
-    get_sky,
-    star_spectra,
 )
+from hiresprojection.star import star_spectra
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

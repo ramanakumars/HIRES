@@ -12,7 +12,7 @@ from astropy.time import Time
 from astroquery.jplhorizons import Horizons
 from scipy.signal import savgol_filter
 
-from hiresprojection.calibration_utils import get_data_from_fits
+from hiresprojection.io_utils import get_data_from_fits
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
