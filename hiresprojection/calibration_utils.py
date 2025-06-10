@@ -21,8 +21,11 @@ def get_standard_error_of_mean(
     :return: the error in the mean
     """
     mean = np.mean(data, axis=axis)
-    cov = np.sum((data - mean) ** 2.0, axis=0) / data.shape[axis]
-    return np.sqrt(np.sum(error**2.0, axis=0) + cov) / error.shape[axis]
+    dmean = np.sqrt(np.sum(error**2.0, axis=axis)) / (data.shape[axis])
+
+    # add the covariance
+    cov = np.sum((data - mean) ** 2.0, axis=axis) / data.shape[axis]
+    return  np.sqrt(dmean ** 2. + cov)
 
 
 def get_sky(
