@@ -131,9 +131,10 @@ for j, (star_name, star_spectrum) in enumerate(star_spectra.items()):
                 scaling = np.exp(-opacity)
 
                 for k in range(31):
+                    scaling_k = np.interp(wavelength[k], wave_coarse[k], scaling[k])
                     wavei = wave_coarse[k]
-                    scaled_datai[k] = sky_subtracted[k] * scaling[k]
-                    scaled_errori[k] = sky_error[k] * scaling[k]
+                    scaled_datai[k] = sky_subtracted[k] * scaling_k
+                    scaled_errori[k] = sky_error[k] * scaling_k
 
                 scaled_star_data.append(scaled_datai)
                 scaled_star_error.append(scaled_errori)

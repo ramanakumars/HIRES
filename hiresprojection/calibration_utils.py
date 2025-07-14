@@ -156,12 +156,14 @@ def get_calibration(
             opacity_error = opacity * extinction['error']
 
             for k in range(31):
+                opacity_k = np.interp(wavelength[k], wave_coarse[k], opacity[k])
+                opacity_k_error = np.interp(wavelength[k], wave_coarse[k], opacity_error[k])
                 wavei = wave_coarse[k]
-                scaled_datai[k] = sky_subtracted[k] * opacity[k]
+                scaled_datai[k] = sky_subtracted[k] * opacity_k
                 scaled_errori[k] = (
                     np.sqrt(
                         (sky_error[k] / sky_subtracted[k]) ** 2
-                        + (opacity_error[k] / opacity[k]) ** 2
+                        + (opacity_k_error / opacity_k) ** 2
                     )
                     * scaled_datai[k]
                 )

@@ -12,7 +12,7 @@ from astropy.time import Time
 from astroquery.jplhorizons import Horizons
 from scipy.signal import savgol_filter
 
-from hiresprojection.io_utils import get_data_from_fits
+from hiresprojection.io_utils import get_coarse_data, get_data_from_fits
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ sky_error = sky_data['error']
 for i, file in enumerate(tqdm.tqdm(jupiter_fits)):
     filename = os.path.basename(file)
     header, datai, unci, wavei = get_data_from_fits(file)
+    wave_coarse, _, _ = get_coarse_data(file)
 
     if 'jupiter' not in header['targname'].lower():
         continue
@@ -77,23 +78,30 @@ for i, file in enumerate(tqdm.tqdm(jupiter_fits)):
     calibrated_unc = np.zeros_like(datai)
     airmass = float(header['AIRMASS'])
 
-    opacity = np.exp(-extinction['extinction'] * airmass)
+    opacity_coarse = np.exp(-extinction['extinction'] * airmass)
     # d(exp(x)) = exp(x) dx
-    opacity_error = opacity * extinction['error']
+    opacity_error_coarse = opacity_coarse * extinction['error']
 
-    opacity = np.repeat(opacity[:, np.newaxis], datai.shape[-1], axis=-1)
-    opacity_error = np.repeat(opacity_error[:, np.newaxis], datai.shape[-1], axis=-1)
+    opacity = np.zeros_like(datai[:, 0, :])
+    opacity_error = np.zeros_like(datai[:, 0, :])
+    for k in range(opacity_coarse.shape[0]):
+        opacity[k] = np.interp(wavei[k], wave_coarse[k], opacity_coarse[k])
+        opacity_error[k] = np.interp(wavei[k], wave_coarse[k], opacity_error_coarse[k])
 
     # area of the pixel in steradians
     ster = float(header['SPASCALE']) * float(header['SPESCALE']) / (206265 * 206265)
 
     for pos in range(61):
-        data_pos_i = savgol_filter(datai[:, pos, :], 201, 1, axis=-1)  # - sky
+        data_pos_i = savgol_filter(datai[:, pos, :], 201, 1, axis=-1) - sky
         unc_pos_i = np.sqrt(
             savgol_filter(unci[:, pos, :], 201, 1, axis=-1) + sky_error**2.0
         )
         calibrated_data[:, pos] = (
-            data_pos_i / calibration['calibration'] / ster / np.pi * opacity
+            data_pos_i
+            / calibration['calibration']
+            / ster
+            / np.pi
+            * opacity
         )
         calibrated_unc[:, pos] = (
             np.sqrt(

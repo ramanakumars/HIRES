@@ -1,5 +1,6 @@
 import numpy as np
 from astropy.io import fits
+from scipy.signal import savgol_filter
 
 NWAVE_COARSE = 50
 
@@ -35,6 +36,9 @@ def get_coarse_data(file: str) -> tuple[np.ndarray, np.ndarray]:
               - uncertainty (shape: n_slit, NWAVE_COARSE, n_echelle_order)
     """
     _, data, uncertainty, wavelength = get_data_from_fits(file)
+
+    data = savgol_filter(data, 201, 1, axis=-1)
+    uncertainty = savgol_filter(uncertainty, 201, 1, axis=-1)
 
     data_coarse = np.zeros((31, 61, NWAVE_COARSE))
     unc_coarse = np.zeros((31, 61, NWAVE_COARSE))

@@ -9,10 +9,7 @@ import tqdm
 from astropy import units as u
 
 from hiresprojection.calibration_utils import get_sky
-from hiresprojection.io_utils import (
-    get_coarse_data,
-    get_data_from_fits,
-)
+from hiresprojection.io_utils import NWAVE_COARSE, get_coarse_data, get_data_from_fits
 from hiresprojection.star import star_spectra
 
 logging.basicConfig(level=logging.INFO)
@@ -102,28 +99,30 @@ sky_error = np.asarray(sky_error)
 airmass = np.asarray(airmass, dtype=float)
 
 # now fit the airmass-extinction relation (we will assume a linear relationship)
-ext_fits = np.zeros((31, 2))
-ext_fits_error = np.zeros((31, 2))
+ext_fits = np.zeros((31, NWAVE_COARSE, 2))
+ext_fits_error = np.zeros((31, NWAVE_COARSE, 2))
 for k in range(31):
     mask = airmass < 2  # np.log(sky_spectra[:, k].mean(-1)) < 3.8
-    errori = np.mean(sky_error[:, k] / sky_spectra[:, k], axis=-1)
+    errori = sky_error[:, k] / sky_spectra[:, k]
     try:
         p, V = np.polyfit(
             airmass[mask],
-            np.log(sky_spectra[mask, k].mean(-1)),
+            np.log(sky_spectra[mask, k]),
             1,
             full=False,
-            w=1 / errori,
+            w=1 / errori.mean(-1),
             rcond=1,
             cov=True,
         )
-        ext_fits[k, :] = p
-        ext_fits_error[k, :] = np.diag(V)
-    except Exception:
+        ext_fits[k, :] = p.T
+        for i in range(NWAVE_COARSE):
+            ext_fits_error[k, i, :] = np.diag(V[:, :, i])
+    except Exception as e:
+        print(e)
         continue
 
 # save this out to a file. the absorption coefficient is the slope in the airmass space
-np.savez(args.output_file, extinction=ext_fits[:, 0], error=ext_fits_error[:, 0])
+np.savez(args.output_file, extinction=ext_fits[:, :, 0], error=ext_fits_error[:, :, 0])
 
 # plot out the extinction corrected spectra
 fig, ax = plt.subplots(1, 1, dpi=150, figsize=(10, 3))
@@ -137,7 +136,7 @@ for i, (file, air) in tqdm.tqdm(
     sky, _ = get_sky(data_coarse, error_coarse, object_mask)
     for k in range(31):
         # extinction is just exp(-tau * X)
-        opacity = np.exp(-ext_fits[k, 0] * air)
+        opacity = np.exp(-ext_fits[k, :-1, 0] * air)
         if k == 0:
             ax.plot(
                 wave_coarse[k, :-1],
